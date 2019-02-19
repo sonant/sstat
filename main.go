@@ -31,14 +31,31 @@ func init() {
 }
 
 func collectData(ctx context.Context, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Infoln("Exit from collect data....")
+			ticker.Stop()
 			wg.Done()
 			return
-		default:
-			time.Sleep(time.Second)
+		case <-ticker.C:
+			logger.Infoln("I'm collecting data for you now...")
+		}
+	}
+}
+
+func sendData(ctx context.Context, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(time.Second * 10)
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Infoln("Exit from send data....")
+			ticker.Stop()
+			wg.Done()
+			return
+		case <-ticker.C:
+			logger.Infoln("I'm sending data to endpoin now...")
 		}
 	}
 }
@@ -62,6 +79,8 @@ func main() {
 	signal.Notify(exit, os.Interrupt)
 	wg.Add(1)
 	go collectData(ctx, &wg)
+	wg.Add(1)
+	go sendData(ctx, &wg)
 
 	<-exit
 
