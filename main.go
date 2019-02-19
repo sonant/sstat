@@ -66,9 +66,12 @@ func main() {
 	<-exit
 
 	logger.Infoln("Got exit signal. Stoping...")
+	//cancel collectionData() executing
 	cancel()
+	//wait until collectData() do everything
 	wg.Wait()
-	logger.Infoln("Buy!")
+	//say BYE! everyONE
+	logger.Infoln("BYE!")
 	os.Exit(0)
 
 }
