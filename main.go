@@ -102,11 +102,14 @@ func main() {
 	wg.Add(1)
 	go sendData(ctx, &wg)
 	logger.Infoln("I'am working...")
+
 	<-exit
 
 	logger.Infoln("Got exit signal. Stoping...")
+
 	// Cancel collectionData() executing.
 	cancel()
+
 	// Wait until collectData() do everything.
 	wg.Wait()
 	db.Close()
