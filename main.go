@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -10,69 +13,86 @@ import (
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/sirupsen/logrus"
 )
 
 var (
-	logger   = logrus.New()
-	endpoint string
-	db       gorm.DB
+	logger    = logrus.New()
+	endpoint  string
+	db        *gorm.DB
+	transport = &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    30 * time.Second,
+		DisableCompression: true,
+	}
+	client = &http.Client{
+		Timeout:   time.Second * 10,
+		Transport: transport,
+	}
 )
 
-//SystemData sturcture
+// SystemData sturcture.
 type SystemData struct {
 	gorm.Model
-	CPULoad float32
-	MEMFree int32
+	CPULoad uint64
+	MEMFree uint64
 }
 
 func init() {
 	logger.SetFormatter(&logrus.JSONFormatter{})
 }
 
+// collectData collect data from system every 1 second.
 func collectData(ctx context.Context, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(time.Second * 1)
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Infoln("Exit from collect data....")
 			ticker.Stop()
 			wg.Done()
 			return
 		case <-ticker.C:
-			logger.Infoln("I'm collecting data for you now...")
+			m, _ := mem.VirtualMemory()
+			db.Create(&SystemData{CPULoad: 10000, MEMFree: m.Free})
 		}
 	}
 }
 
+// sendData send data to endpoint every 10 seconds and clean DB if success.
 func sendData(ctx context.Context, wg *sync.WaitGroup) {
+	var data []SystemData
 	ticker := time.NewTicker(time.Second * 10)
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Infoln("Exit from send data....")
 			ticker.Stop()
 			wg.Done()
 			return
 		case <-ticker.C:
-			logger.Infoln("I'm sending data to endpoin now...")
+			db.Find(&data)
+			d, _ := json.Marshal(&data)
+			// client.Post
+			fmt.Printf("%s\n", d)
+			db.Delete(&data)
+			data = data[:0]
 		}
 	}
 }
 
 func main() {
+	var err error
 	exit := make(chan os.Signal, 1)
 	var wg sync.WaitGroup
 	flag.StringVar(&endpoint, "endpoint", "", "Address of remote server, which recive logs.")
 	flag.Parse()
 
-	//prepare database connection
-	db, err := gorm.Open("sqlite3", "./db.db")
+	// Prepare database connection.
+	db, err = gorm.Open("sqlite3", "./db.db")
 	if err != nil {
 		logger.Errorln(err)
 	}
-	defer db.Close()
-
+	db.DB().SetMaxIdleConns(0)
 	db.AutoMigrate(&SystemData{})
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -81,15 +101,17 @@ func main() {
 	go collectData(ctx, &wg)
 	wg.Add(1)
 	go sendData(ctx, &wg)
-
+	logger.Infoln("I'am working...")
 	<-exit
 
 	logger.Infoln("Got exit signal. Stoping...")
-	//cancel collectionData() executing
+	// Cancel collectionData() executing.
 	cancel()
-	//wait until collectData() do everything
+	// Wait until collectData() do everything.
 	wg.Wait()
-	//say BYE! everyONE
+	db.Close()
+
+	// Say BYE! everyONE.
 	logger.Infoln("BYE!")
 	os.Exit(0)
 
